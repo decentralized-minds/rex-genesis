@@ -21,13 +21,13 @@ IP=$(shell toml get ${DATA_PATH}/miner.toml profile.ip)
 
 # Github settings
 GITHUB_TOKEN = $(shell cat ${DATA_PATH}/github_token.txt || echo NOT FOUND)
-REPO_ORG = OLSF
+REPO_ORG = decentralized-minds
 
 ifeq (${TEST}, y)
-REPO_NAME = dev-genesis
+REPO_NAME = rex-genesis
 MNEM = $(shell cat fixtures/mnemonic/${NS}.mnem)
 else
-REPO_NAME = experimental-genesis
+REPO_NAME = rex-genesis
 NODE_ENV = prod
 endif
 #experimental network is #7
