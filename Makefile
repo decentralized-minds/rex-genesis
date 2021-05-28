@@ -66,7 +66,7 @@ layout:
 	--path ./util/set_layout_${NODE_ENV}.toml
 
 root:
-		cargo run -p libra-genesis-tool --release -- libra-root-key \
+		cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- libra-root-key \
 		--validator-backend ${LOCAL} \
 		--shared-backend ${REMOTE}
 
@@ -76,8 +76,8 @@ treasury:
 		--shared-backend ${REMOTE}
 
 #### GENESIS REGISTRATION ####
-ceremony:
-	export NODE_ENV=prod && miner ceremony
+configs:
+	export NODE_ENV=prod && cargo run -p onboard val 
 
 register:
 # export ACC=$(shell toml get ${DATA_PATH}/miner.toml profile.account)
@@ -101,7 +101,7 @@ init-test:
 	echo ${MNEM} | head -c -1 | cargo run -p libra-genesis-tool --  init --path=${DATA_PATH} --namespace=${ACC}
 
 init:
-	cargo run -p libra-genesis-tool --release --  init --path=${DATA_PATH} --namespace=${ACC}
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  init --path=${DATA_PATH} --namespace=${ACC}
 # OWNER does this
 # Submits proofs to shared storage
 add-proofs:
