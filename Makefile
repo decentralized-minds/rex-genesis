@@ -2,6 +2,7 @@
 SHELL=/usr/bin/env bash
 DATA_PATH = ${HOME}/.0L
 
+
 # Chain settings
 CHAIN_ID = 1
 
@@ -21,11 +22,14 @@ IP=$(shell toml get ${DATA_PATH}/0L.toml profile.ip)
 
 # Github settings
 GITHUB_TOKEN = $(shell cat ${DATA_PATH}/github_token.txt || echo NOT FOUND)
+ifndef NODE_ENV
+NODE_ENV = prod
+endif
 
 #REPO_ORG = decentralized-minds
 REPO_ORG = decentralized-minds
 REPO_NAME = rex-genesis
-NODE_ENV = prod
+LAYOUT_FILE = ~/rex-genesis/set_layout.toml
 
 # Registration params
 REMOTE = 'backend=github;repository_owner=${REPO_ORG};repository=${REPO_NAME};token=${DATA_PATH}/github_token.txt;namespace=${ACC}'
@@ -57,13 +61,10 @@ install:
 # pipelines for genesis ceremony
 
 #### GENESIS BACKEND SETUP ####
-init-backend: 
-	curl -X POST -H "Authorization: token ${GITHUB_TOKEN}" https://api.github.com/orgs/${REPO_ORG}/repos -d '{"name":"${REPO_NAME}", "private": "true", "auto_init": "true"}'
-
 layout:
 	cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- set-layout \
 	--shared-backend 'backend=github;repository_owner=${REPO_ORG};repository=${REPO_NAME};token=${DATA_PATH}/github_token.txt;namespace=common' \
-	--path ${DATA_PATH}/layout.toml
+	--path ${LAYOUT_FILE}
 
 root:
 		cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- libra-root-key \
@@ -76,9 +77,18 @@ treasury:
 		--shared-backend ${REMOTE}
 
 #### GENESIS REGISTRATION ####
-configs:
-	export NODE_ENV=prod && cargo run -p onboard val 
 
+# create a new mnemonic and account
+keygen:
+	cd ${SOURCE} && cargo run -p onboard -- keygen
+
+init:
+	cd ${SOURCE} && cargo run -p ol -- init
+
+mine:
+	cd ${SOURCE} && cargo run -p miner -- zero
+
+# send registration info
 register:
 	@echo Initializing from ${DATA_PATH}/0L.toml with account:
 	@echo ${ACC}
@@ -97,18 +107,29 @@ register:
 	@echo OPER send signed transaction with configurations for *OWNER* account
 	ACC=${ACC}-oper OWNER=${ACC} IP=${IP} make reg
 
-init-test:
-	echo ${MNEM} | head -c -1 | cargo run -p libra-genesis-tool --  init --path=${DATA_PATH} --namespace=${ACC}
+#### GENESIS  ####
+genesis:
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- genesis \
+	--chain-id ${CHAIN_ID} \
+	--shared-backend ${REMOTE} \
+	--path ${DATA_PATH}/genesis.blob
 
-keygen:
-	cd ${SOURCE} && cargo run -p onboard -- keygen
+node-file:
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- files \
+	--chain-id ${CHAIN_ID} \
+	--validator-backend ${LOCAL} \
+	--data-path ${DATA_PATH} \
+	--namespace ${ACC}-oper \
+	--repo ${REPO_NAME} \
+	--github-org ${REPO_ORG}
 
-genesis-init:
-	cd ${SOURCE} && cargo run -p ol -- init
+remove-key:
+	make stop
+	jq 'del(.["${ACC}-oper/owner")' ${DATA_PATH}/key_store.json > ${DATA_PATH}/tmp
+	mv ${DATA_PATH}/tmp ${DATA_PATH}/key_store.json
 
-genesis-miner:
-	cd ${SOURCE} && cargo run -p miner -- zero
 
+########## Recipes for Genesis ##########
 
 # OWNER does this
 # Submits proofs to shared storage
@@ -162,62 +183,12 @@ verify-gen:
 	--genesis-path ${DATA_PATH}/genesis.blob
 
 
-#### GENESIS  ####
-build-gen:
-	cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- genesis \
-	--chain-id ${CHAIN_ID} \
-	--shared-backend ${REMOTE} \
-	--path ${DATA_PATH}/genesis.blob
-
-genesis:
-	cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- files \
-	--chain-id ${CHAIN_ID} \
-	--validator-backend ${LOCAL} \
-	--data-path ${DATA_PATH} \
-	--namespace ${ACC}-oper \
-	--repo ${REPO_NAME} \
-	--github-org ${REPO_ORG}
 
 
 #### NODE MANAGEMENT ####
 start:
 # run in foreground. Only for testing, use a daemon for net.
-	cd ${SOURCE} && cargo run -p libra-node -- --config ${DATA_PATH}/node.yaml
-
-daemon:
-# your node's custom libra-node.service lives in ~/.0L. Take the template from libra/util and edit for your needs.
-	sudo cp -f ~/.0L/libra-node.service /lib/systemd/system/
-
-	@if test -d ~/logs; then \
-		echo "WIPING SYSTEMD LOGS"; \
-		sudo rm -rf ~/logs*; \
-	fi 
-
-	sudo mkdir ~/logs
-	sudo touch ~/logs/node.log
-	sudo chmod 777 ~/logs
-	sudo chmod 777 ~/logs/node.log
-
-	sudo systemctl daemon-reload
-	sudo systemctl stop libra-node.service
-	sudo systemctl start libra-node.service
-	sudo sleep 2
-	sudo systemctl status libra-node.service &
-	sudo tail -f ~/logs/node.log
-
-#### TEST SETUP ####
-
-clear:
-	if test ${DATA_PATH}/key_store.json; then \
-		cd ${DATA_PATH} && rm -rf libradb *.yaml *.blob *.json db *.toml; \
-	fi
-	if test -d ${DATA_PATH}/blocks; then \
-		rm -f ${DATA_PATH}/blocks/*.json; \
-	fi
-
-fixture-stdlib:
-	make stdlib
-	cp language/stdlib/staged/stdlib.mv fixtures/stdlib/fresh_stdlib.mv
+	cd ${SOURCE} && cargo run -p libra-node -- --config ${DATA_PATH}/validator.node.yaml
 
 #### HELPERS ####
 check:
@@ -276,93 +247,9 @@ set-waypoint:
 	@echo client_waypoint:
 	@cat ${DATA_PATH}/client_waypoint
 
-client: set-waypoint
-ifeq (${TEST}, y)
-	 echo ${MNEM} | cargo run -p cli -- -u http://localhost:8080 --waypoint $$(cat ${DATA_PATH}/client_waypoint) --chain-id ${CHAIN_ID}
-else
-	cargo run -p cli -- -u http://localhost:8080 --waypoint $$(cat ${DATA_PATH}/client_waypoint) --chain-id ${CHAIN_ID}
-endif
-
-test: set-waypoint
-	cargo run -p cli -- -u http://localhost:8080 --waypoint "$$(cat ${DATA_PATH}/client_waypoint)" --chain-id ${CHAIN_ID}
-
 
 stdlib:
 	cargo run --release -p stdlib
 	cargo run --release -p stdlib -- --create-upgrade-payload
 	sha256sum language/stdlib/staged/stdlib.mv
 
-
-reset: stop clear fixtures init keys genesis daemon
-
-remove-keys:
-	make stop
-	jq 'del(.["${ACC}-oper/owner", "${ACC}-oper/operator"])' ${DATA_PATH}/key_store.json > ${DATA_PATH}/tmp
-	mv ${DATA_PATH}/tmp ${DATA_PATH}/key_store.json
-
-wipe: 
-	history -c
-	shred ~/.bash_history
-	srm ~/.bash_history
-
-stop:
-	sudo service libra-node stop
-
-
-##### DEVNET TESTS #####
-# Quickly start a devnet with fixture files. To do a full devnet setup see 'devnet-reset' below
-
-devnet: stop clear fix devnet-keys devnet-yaml start
-# runs a smoke test from fixtures. Uses genesis blob from fixtures, assumes 3 validators, and test settings.
-# This will work for validator nodes alice, bob, carol, and any fullnodes; 'eve'
-
-devnet-keys: 
-	@printf '${MNEM}' | cargo run -p miner -- init --skip-miner
-
-devnet-yaml:
-	cargo run -p miner -- genesis
-
-devnet-onboard: clear fix
-	#starts config for a new miner "eve", uses the devnet github repo for ceremony
-	cargo r -p miner -- init --skip-miner <<< $$'${MNEM}'
-	cargo r -p miner -- genesis
-
-devnet-previous: stop clear 
-# runs a smoke test from fixtures. Uses genesis blob from fixtures, assumes 3 validators, and test settings.
-	V=previous make fix devnet-keys devnet-yaml start
-
-
-### FULL DEVNET RESET ####
-
-devnet-reset: devnet-reset-ceremony genesis start
-# Tests the full genesis ceremony cycle, and rebuilds all genesis and waypoints.
-
-devnet-reset-ceremony:
-# note: this uses the NS in local env to create files i.e. alice or bob
-# as a operator/owner pair.
-	SKIP_BLOB=y make clear fix
-	echo ${MNEM} | head -c -1 | make register
-
-devnet-reset-onboard: clear 
-# fixtures needs a file that works
-	SKIP_BLOB=y fix
-# starts config for a new miner "eve", uses the devnet github repo for ceremony
-	cargo r -p miner -- val-wizard --chain-id 1 --github-org OLSF --repo dev-genesis --rebuild-genesis --skip-mining
-
-#### GIT HELPERS FOR DEVNET AUTOMATION ####
-devnet-save-genesis: get-waypoint
-	echo $$WAY > ${DATA_PATH}/genesis_waypoint
-	rsync -a ${DATA_PATH}/genesis* ${SOURCE}/fixtures/genesis/${V}/
-	git add ${SOURCE}/fixtures/genesis/${V}/
-	git commit -a -m "save genesis fixtures to ${V}"
-	git push
-
-devnet-hard:
-	git reset --hard origin/${V} 
-
-devnet-pull:
-# must be on a branch
-	git fetch && git checkout ${V} -f && git pull
-
-devnet-fn:
-	cargo run -p miner -- fn-wizard --path ~/.0L/
