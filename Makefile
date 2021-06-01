@@ -23,7 +23,7 @@ IP=$(shell toml get ${DATA_PATH}/0L.toml profile.ip)
 GITHUB_TOKEN = $(shell cat ${DATA_PATH}/github_token.txt || echo NOT FOUND)
 
 #REPO_ORG = decentralized-minds
-REPO_ORG = lpgeiger
+REPO_ORG = decentralized-minds
 REPO_NAME = rex-genesis
 NODE_ENV = prod
 
