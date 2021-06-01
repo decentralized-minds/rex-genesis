@@ -1,6 +1,7 @@
 
 # REX
 
+## For registration in genesis:
 1. Keygen - create new account and mnemonic
 
 ```
