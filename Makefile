@@ -63,7 +63,7 @@ init-backend:
 layout:
 	cargo run -p libra-genesis-tool --release -- set-layout \
 	--shared-backend 'backend=github;repository_owner=${REPO_ORG};repository=${REPO_NAME};token=${DATA_PATH}/github_token.txt;namespace=common' \
-	--path ./util/set_layout_${NODE_ENV}.toml
+	--path ./set_layout_${NODE_ENV}.toml
 
 root:
 		cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- libra-root-key \
