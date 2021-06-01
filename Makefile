@@ -15,22 +15,17 @@ endif
 
 # Account settings
 ifndef ACC
-ACC=$(shell toml get ${DATA_PATH}/miner.toml profile.account | tr -d '"')
+ACC=$(shell toml get ${DATA_PATH}/0L.toml profile.account | tr -d '"')
 endif
-IP=$(shell toml get ${DATA_PATH}/miner.toml profile.ip)
+IP=$(shell toml get ${DATA_PATH}/0L.toml profile.ip)
 
 # Github settings
 GITHUB_TOKEN = $(shell cat ${DATA_PATH}/github_token.txt || echo NOT FOUND)
-REPO_ORG = decentralized-minds
 
-ifeq (${TEST}, y)
-REPO_NAME = rex-genesis
-MNEM = $(shell cat fixtures/mnemonic/${NS}.mnem)
-else
+#REPO_ORG = decentralized-minds
+REPO_ORG = lpgeiger
 REPO_NAME = rex-genesis
 NODE_ENV = prod
-endif
-#experimental network is #7
 
 # Registration params
 REMOTE = 'backend=github;repository_owner=${REPO_ORG};repository=${REPO_NAME};token=${DATA_PATH}/github_token.txt;namespace=${ACC}'
@@ -38,20 +33,25 @@ LOCAL = 'backend=disk;path=${DATA_PATH}/key_store.json;namespace=${ACC}'
 
 ##### DEPENDENCIES #####
 deps:
-	#install rust
-	curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y
-	#target is Ubuntu
-	sudo apt-get update
-	sudo apt-get -y install build-essential cmake clang llvm libgmp-dev pkg-config libssl-dev
-
+	. ./ol/util/setup.sh
 
 bins:
-	#TOML cli
-	cargo install toml-cli
+# Build and install genesis tool, libra-node, and miner
 	cargo run -p stdlib --release
-	#Build and install genesis tool, libra-node, and miner
-	cargo build -p miner --release && sudo cp -f ${SOURCE}/target/release/miner /usr/local/bin/miner
-	cargo build -p libra-node --release && sudo cp -f ${SOURCE}/target/release/libra-node /usr/local/bin/libra-node
+
+# NOTE: stdlib is built for cli bindings
+	cargo build -p libra-node -p miner -p backup-cli -p ol -p txs -p onboard --release
+
+install:
+	sudo cp -f ${SOURCE}/target/release/miner /usr/local/bin/miner
+	sudo cp -f ${SOURCE}/target/release/libra-node /usr/local/bin/libra-node
+	sudo cp -f ${SOURCE}/target/release/db-restore /usr/local/bin/db-restore
+	sudo cp -f ${SOURCE}/target/release/db-backup /usr/local/bin/db-backup
+	sudo cp -f ${SOURCE}/target/release/db-backup-verify /usr/local/bin/db-backup-verify
+	sudo cp -f ${SOURCE}/target/release/ol /usr/local/bin/ol
+	sudo cp -f ${SOURCE}/target/release/txs /usr/local/bin/txs
+	sudo cp -f ${SOURCE}/target/release/onboard /usr/local/bin/onboard
+
 
 ##### PIPELINES #####
 # pipelines for genesis ceremony
@@ -61,9 +61,9 @@ init-backend:
 	curl -X POST -H "Authorization: token ${GITHUB_TOKEN}" https://api.github.com/orgs/${REPO_ORG}/repos -d '{"name":"${REPO_NAME}", "private": "true", "auto_init": "true"}'
 
 layout:
-	cargo run -p libra-genesis-tool --release -- set-layout \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- set-layout \
 	--shared-backend 'backend=github;repository_owner=${REPO_ORG};repository=${REPO_NAME};token=${DATA_PATH}/github_token.txt;namespace=common' \
-	--path ./set_layout_${NODE_ENV}.toml
+	--path ${DATA_PATH}/layout.toml
 
 root:
 		cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- libra-root-key \
@@ -71,7 +71,7 @@ root:
 		--shared-backend ${REMOTE}
 
 treasury:
-		cargo run -p libra-genesis-tool --release --  treasury-compliance-key \
+		cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  treasury-compliance-key \
 		--validator-backend ${LOCAL} \
 		--shared-backend ${REMOTE}
 
@@ -80,10 +80,10 @@ configs:
 	export NODE_ENV=prod && cargo run -p onboard val 
 
 register:
-# export ACC=$(shell toml get ${DATA_PATH}/miner.toml profile.account)
-	@echo Initializing from ${DATA_PATH}/miner.toml with account:
+	@echo Initializing from ${DATA_PATH}/0L.toml with account:
 	@echo ${ACC}
-	make init
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  init --path=${DATA_PATH} --namespace=${ACC}
+# make genesis-init
 
 	@echo the OPER initializes local accounts and submit pubkeys to github
 	ACC=${ACC}-oper make oper-key
@@ -100,40 +100,48 @@ register:
 init-test:
 	echo ${MNEM} | head -c -1 | cargo run -p libra-genesis-tool --  init --path=${DATA_PATH} --namespace=${ACC}
 
-init:
-	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  init --path=${DATA_PATH} --namespace=${ACC}
+keygen:
+	cd ${SOURCE} && cargo run -p onboard -- keygen
+
+genesis-init:
+	cd ${SOURCE} && cargo run -p ol -- init
+
+genesis-miner:
+	cd ${SOURCE} && cargo run -p miner -- zero
+
+
 # OWNER does this
 # Submits proofs to shared storage
 add-proofs:
-	cargo run -p libra-genesis-tool --release --  mining \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  mining \
 	--path-to-genesis-pow ${DATA_PATH}/blocks/block_0.json \
 	--shared-backend ${REMOTE}
 
 # OPER does this
 # Submits operator key to github, and creates local OPERATOR_ACCOUNT
 oper-key:
-	cargo run -p libra-genesis-tool --release --  operator-key \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  operator-key \
 	--validator-backend ${LOCAL} \
 	--shared-backend ${REMOTE}
 
 # OWNER does this
 # Submits operator key to github, does *NOT* create the OWNER_ACCOUNT locally
 owner-key:
-	cargo run -p libra-genesis-tool --release --  owner-key \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  owner-key \
 	--validator-backend ${LOCAL} \
 	--shared-backend ${REMOTE}
 
 # OWNER does this
 # Links to an operator on github, creates the OWNER_ACCOUNT locally
 assign: 
-	cargo run -p libra-genesis-tool --release --  set-operator \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  set-operator \
 	--operator-name ${OPER} \
 	--shared-backend ${REMOTE}
 
 # OPER does this
 # Submits signed validator registration transaction to github.
 reg:
-	cargo run -p libra-genesis-tool --release --  validator-config \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  validator-config \
 	--owner-name ${OWNER} \
 	--chain-id ${CHAIN_ID} \
 	--validator-address "/ip4/${IP}/tcp/6180" \
@@ -144,25 +152,25 @@ reg:
 
 ## Helpers to verify the local state.
 verify:
-	cargo run -p libra-genesis-tool --release --  verify \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  verify \
 	--validator-backend ${LOCAL}
 	# --genesis-path ${DATA_PATH}/genesis.blob
 
 verify-gen:
-	cargo run -p libra-genesis-tool --release --  verify \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release --  verify \
 	--validator-backend ${LOCAL} \
 	--genesis-path ${DATA_PATH}/genesis.blob
 
 
 #### GENESIS  ####
 build-gen:
-	cargo run -p libra-genesis-tool --release -- genesis \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- genesis \
 	--chain-id ${CHAIN_ID} \
 	--shared-backend ${REMOTE} \
 	--path ${DATA_PATH}/genesis.blob
 
 genesis:
-	cargo run -p libra-genesis-tool --release -- files \
+	cd ${SOURCE} && cargo run -p libra-genesis-tool --release -- files \
 	--chain-id ${CHAIN_ID} \
 	--validator-backend ${LOCAL} \
 	--data-path ${DATA_PATH} \
@@ -174,7 +182,7 @@ genesis:
 #### NODE MANAGEMENT ####
 start:
 # run in foreground. Only for testing, use a daemon for net.
-	cargo run -p libra-node -- --config ${DATA_PATH}/node.yaml
+	cd ${SOURCE} && cargo run -p libra-node -- --config ${DATA_PATH}/node.yaml
 
 daemon:
 # your node's custom libra-node.service lives in ~/.0L. Take the template from libra/util and edit for your needs.
@@ -239,8 +247,8 @@ ifdef TEST
 		rm ${DATA_PATH}/blocks/block_0.json; \
 	fi 
 
-	@if test -f ${DATA_PATH}/miner.toml; then \
-		rm ${DATA_PATH}/miner.toml; \
+	@if test -f ${DATA_PATH}/0L.toml; then \
+		rm ${DATA_PATH}/0L.toml; \
 	fi 
 
 # skip  genesis files with fixtures, there may be no version
@@ -249,7 +257,7 @@ ifndef SKIP_BLOB
 	cp ./fixtures/genesis/${V}/genesis_waypoint ${DATA_PATH}/
 endif
 # skip miner configuration with fixtures
-	cp ./fixtures/configs/${NS}.toml ${DATA_PATH}/miner.toml
+	cp ./fixtures/configs/${NS}.toml ${DATA_PATH}/0L.toml
 # skip mining proof zero with fixtures
 	cp ./fixtures/blocks/${NODE_ENV}/${NS}/block_0.json ${DATA_PATH}/blocks/block_0.json
 
@@ -283,12 +291,7 @@ stdlib:
 	cargo run --release -p stdlib
 	cargo run --release -p stdlib -- --create-upgrade-payload
 	sha256sum language/stdlib/staged/stdlib.mv
-  
-keygen:
-	cd ${DATA_PATH} && miner keygen
 
-miner-genesis:
-	cd ${DATA_PATH} && NODE_ENV=${NODE_ENV} miner genesis
 
 reset: stop clear fixtures init keys genesis daemon
 
