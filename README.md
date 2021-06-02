@@ -20,8 +20,13 @@ make init
 make mine
 ```
 
-4. Register
-Please ensure you have github token in 0L directory. `cp your/path/github_token.txt ~/.OL/`
+4. Have your [github token](https://docs.github.com/en/github/authenticating-to-github/keeping-your-account-and-data-secure/creating-a-personal-access-token) in 0L directory. 
+
+```
+cp your/path/github_token.txt ~/.OL/
+```
+
+5. Register
 
 ```
 make register
