@@ -24,7 +24,7 @@ make mine
 Please ensure you have github token in 0L directory. `cp your/path/github_token.txt ~/.OL/`
 
 ```
-make mine
+make register
 ```
 
 # Wait for everyone to register
