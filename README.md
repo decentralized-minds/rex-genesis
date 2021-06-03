@@ -39,6 +39,7 @@ make register
 # Do Genesis
 1. Build the genesis transaction
 ```
+export NODE_ENV=prod
 make genesis
 ```
 
