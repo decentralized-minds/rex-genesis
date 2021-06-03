@@ -47,3 +47,9 @@ make genesis
 ```
 make node-file
 ```
+
+3. Build the binaries
+```
+cd ~/libra
+make bins install
+```
